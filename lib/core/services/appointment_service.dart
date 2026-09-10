@@ -11,6 +11,9 @@ class AppointmentService {
     required DateTime dateTime,
     required double latitude,
     required double longitude,
+    required String address,
+    required String flatNumber,
+    required String floor,
   }) async {
     await _db.collection('appointments').add({
       'patientId': patientId,
@@ -18,6 +21,9 @@ class AppointmentService {
       'testType': testType,
       'dateTime': Timestamp.fromDate(dateTime),
       'location': GeoPoint(latitude, longitude),
+      'address': address,
+      'flatNumber': flatNumber,
+      'floor': floor,
       'status': 'pending', // pending, assigned, completed
       'phlebotomistId': null,
       'createdAt': FieldValue.serverTimestamp(),

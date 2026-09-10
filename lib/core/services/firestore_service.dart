@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class FirestoreService {
@@ -21,7 +22,7 @@ class FirestoreService {
         return doc['role'] as String?;
       }
     } catch (e) {
-      print("Error getting user role: $e");
+      debugPrint("Error getting user role: $e");
     }
     return null;
   }

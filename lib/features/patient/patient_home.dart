@@ -59,18 +59,10 @@ class PatientHome extends StatelessWidget {
                             ? IconButton(
                                 icon: const Icon(Icons.description, color: Colors.blue),
                                 onPressed: () {
-                                  // TODO: Navigate to Report View
-                                  showDialog(
-                                    context: context,
-                                    builder: (ctx) => AlertDialog(
-                                      title: const Text("Report"),
-                                      content: const Text("Report viewing to be implemented (Mock: Report is ready!)"),
-                                      actions: [
-                                        TextButton(
-                                          onPressed: () => Navigator.pop(ctx),
-                                          child: const Text("Close"),
-                                        )
-                                      ],
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => ReportViewScreen(appointmentData: data),
                                     ),
                                   );
                                 },
@@ -105,7 +97,7 @@ class PatientHome extends StatelessWidget {
 
   IconData _getStatusIcon(String status) {
     switch (status) {
-      case 'pending': return Colors.orange != null ? Icons.access_time : Icons.error; // Hacky check
+      case 'pending': return Icons.access_time;
       case 'assigned': return Icons.person;
       case 'completed': return Icons.check;
       default: return Icons.help;

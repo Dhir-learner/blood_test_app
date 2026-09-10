@@ -1,8 +1,10 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
+import 'package:file_picker/file_picker.dart';
 import '../../core/services/auth_service.dart';
-import '../../core/services/appointment_service.dart';
+import '../../core/services/storage_service.dart';
 
 class AdminHome extends StatelessWidget {
   const AdminHome({super.key});
@@ -105,32 +107,95 @@ class AppointmentList extends StatelessWidget {
   }
 
   void _showUploadReportDialog(BuildContext context, String appointmentId) {
-    final controller = TextEditingController();
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Upload Report"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text("Enter Report URL (Mock):"),
-            TextField(controller: controller, decoration: const InputDecoration(hintText: "http://example.com/report.pdf")),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
-          ElevatedButton(
-            onPressed: () async {
-              await FirebaseFirestore.instance
-                  .collection('appointments')
-                  .doc(appointmentId)
-                  .update({'reportUrl': controller.text});
-              if (context.mounted) Navigator.pop(context);
-            },
-            child: const Text("Upload"),
+      builder: (context) => UploadReportDialog(appointmentId: appointmentId),
+    );
+  }
+}
+
+class UploadReportDialog extends StatefulWidget {
+  final String appointmentId;
+  const UploadReportDialog({super.key, required this.appointmentId});
+
+  @override
+  State<UploadReportDialog> createState() => _UploadReportDialogState();
+}
+
+class _UploadReportDialogState extends State<UploadReportDialog> {
+  File? _selectedFile;
+  bool _isUploading = false;
+
+  Future<void> _pickFile() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['pdf', 'jpg', 'png'],
+    );
+
+    if (result != null && result.files.single.path != null) {
+      setState(() => _selectedFile = File(result.files.single.path!));
+    }
+  }
+
+  Future<void> _upload() async {
+    if (_selectedFile == null) return;
+
+    setState(() => _isUploading = true);
+    try {
+      final url = await StorageService().uploadReport(widget.appointmentId, _selectedFile!);
+      if (url != null) {
+        await FirebaseFirestore.instance
+            .collection('appointments')
+            .doc(widget.appointmentId)
+            .update({'reportUrl': url});
+        if (mounted) Navigator.pop(context);
+      } else {
+        throw "Upload failed";
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error: $e")),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isUploading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text("Upload Report"),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (_selectedFile != null)
+            Text("Selected: ${p.basename(_selectedFile!.path)}")
+          else
+            const Text("No file selected"),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            onPressed: _isUploading ? null : _pickFile,
+            icon: const Icon(Icons.attach_file),
+            label: const Text("Pick Document"),
           ),
+          if (_isUploading) ...[
+            const SizedBox(height: 16),
+            const CircularProgressIndicator(),
+          ],
         ],
       ),
+      actions: [
+        TextButton(
+          onPressed: _isUploading ? null : () => Navigator.pop(context),
+          child: const Text("Cancel"),
+        ),
+        ElevatedButton(
+          onPressed: _selectedFile == null || _isUploading ? null : _upload,
+          child: const Text("Upload"),
+        ),
+      ],
     );
   }
 }
@@ -166,7 +231,7 @@ class _AssignPhlebotomistDialogState extends State<AssignPhlebotomistDialog> {
           }
 
           return DropdownButtonFormField<String>(
-            value: _selectedPhlebotomistId,
+            initialValue: _selectedPhlebotomistId,
             hint: const Text("Select Phlebotomist"),
             items: phlebotomists.map((doc) {
               final data = doc.data() as Map<String, dynamic>;

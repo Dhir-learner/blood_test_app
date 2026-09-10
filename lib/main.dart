@@ -9,7 +9,7 @@ void main() async {
     await Firebase.initializeApp();
   } catch (e) {
     error = e.toString();
-    print("Firebase initialization failed: $e");
+    debugPrint("Firebase initialization failed: $e");
   }
   
   runApp(BloodTestApp(initializationError: error));

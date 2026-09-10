@@ -45,9 +45,11 @@ class _LoginScreenState extends State<LoginScreen> {
       }
       // Navigation is handled by AuthWrapper listening to stream
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Error: ${e.toString()}")),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error: ${e.toString()}")),
+        );
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -70,7 +72,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<String>(
-                  value: _selectedRole,
+                  initialValue: _selectedRole,
                   items: const [
                     DropdownMenuItem(value: 'patient', child: Text("Patient")),
                     DropdownMenuItem(value: 'admin', child: Text("Admin")),
