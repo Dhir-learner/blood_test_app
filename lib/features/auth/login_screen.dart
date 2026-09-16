@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+
 import '../../core/services/auth_service.dart';
 import '../../core/services/firestore_service.dart';
+import '../../core/theme/app_theme.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -11,20 +13,25 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _nameController = TextEditingController();
+  final _phoneController = TextEditingController();
+
   final AuthService _authService = AuthService();
   final FirestoreService _firestoreService = FirestoreService();
 
   bool _isLogin = true;
   bool _isLoading = false;
+  bool _obscurePassword = true;
 
   @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
     _nameController.dispose();
+    _phoneController.dispose();
     super.dispose();
   }
 
@@ -48,19 +55,19 @@ class _LoginScreenState extends State<LoginScreen> {
       case 'network-request-failed':
         return "Network error. Please check your connection.";
       default:
-        return _isLogin ? "Invalid email or password." : "Registration failed. Please try again.";
+        return _isLogin
+            ? "Invalid email or password."
+            : "Registration failed. Please try again.";
     }
   }
 
-  void _submit() async {
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+
     final email = _emailController.text.trim();
     final password = _passwordController.text; // Passwords are never trimmed
     final name = _nameController.text.trim();
-
-    if (email.isEmpty || password.isEmpty || (!_isLogin && name.isEmpty)) {
-      _showError("Please fill all fields");
-      return;
-    }
+    final phone = _phoneController.text.trim();
 
     setState(() => _isLoading = true);
     try {
@@ -74,6 +81,7 @@ class _LoginScreenState extends State<LoginScreen> {
             cred.user!.uid,
             cred.user!.email ?? email,
             name,
+            phone,
           );
         }
       }
@@ -90,48 +98,186 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     return Scaffold(
-      appBar: AppBar(title: Text(_isLogin ? "Login" : "Register")),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              if (!_isLogin) ...[
-                TextField(
-                  controller: _nameController,
-                  decoration: const InputDecoration(labelText: "Full Name"),
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 460),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _Brand(scheme: scheme),
+                    const SizedBox(height: 32),
+                    Text(
+                      _isLogin ? "Welcome back" : "Create your account",
+                      style: Theme.of(context)
+                          .textTheme
+                          .headlineSmall
+                          ?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      _isLogin
+                          ? "Sign in to book tests and view your reports."
+                          : "Book blood tests at home and get reports on your phone.",
+                      style: TextStyle(color: scheme.onSurfaceVariant),
+                    ),
+                    const SizedBox(height: 28),
+                    if (!_isLogin) ...[
+                      TextFormField(
+                        controller: _nameController,
+                        textCapitalization: TextCapitalization.words,
+                        decoration: const InputDecoration(
+                          labelText: "Full name",
+                          prefixIcon: Icon(Icons.person_outline),
+                        ),
+                        validator: (v) => (v == null || v.trim().isEmpty)
+                            ? "Please enter your name"
+                            : null,
+                      ),
+                      const SizedBox(height: 14),
+                      TextFormField(
+                        controller: _phoneController,
+                        keyboardType: TextInputType.phone,
+                        decoration: const InputDecoration(
+                          labelText: "Phone number",
+                          helperText: "The collector will call you on this number",
+                          prefixIcon: Icon(Icons.phone_outlined),
+                        ),
+                        validator: (v) {
+                          final digits =
+                              (v ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+                          if (digits.length < 10) {
+                            return "Enter a valid phone number";
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 14),
+                    ],
+                    TextFormField(
+                      controller: _emailController,
+                      keyboardType: TextInputType.emailAddress,
+                      autofillHints: const [AutofillHints.email],
+                      decoration: const InputDecoration(
+                        labelText: "Email",
+                        prefixIcon: Icon(Icons.alternate_email),
+                      ),
+                      validator: (v) {
+                        final value = (v ?? '').trim();
+                        if (value.isEmpty) return "Please enter your email";
+                        if (!value.contains('@') || !value.contains('.')) {
+                          return "Enter a valid email address";
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 14),
+                    TextFormField(
+                      controller: _passwordController,
+                      obscureText: _obscurePassword,
+                      decoration: InputDecoration(
+                        labelText: "Password",
+                        prefixIcon: const Icon(Icons.lock_outline),
+                        suffixIcon: IconButton(
+                          icon: Icon(_obscurePassword
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined),
+                          onPressed: () => setState(
+                              () => _obscurePassword = !_obscurePassword),
+                        ),
+                      ),
+                      validator: (v) {
+                        if ((v ?? '').isEmpty) return "Please enter your password";
+                        if (!_isLogin && v!.length < 6) {
+                          return "Use at least 6 characters";
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 24),
+                    FilledButton(
+                      onPressed: _isLoading ? null : _submit,
+                      child: _isLoading
+                          ? const SizedBox(
+                              height: 22,
+                              width: 22,
+                              child: CircularProgressIndicator(strokeWidth: 2.4),
+                            )
+                          : Text(_isLogin ? "Sign in" : "Create account"),
+                    ),
+                    const SizedBox(height: 10),
+                    TextButton(
+                      onPressed: _isLoading
+                          ? null
+                          : () => setState(() {
+                                _isLogin = !_isLogin;
+                                _formKey.currentState?.reset();
+                              }),
+                      child: Text(_isLogin
+                          ? "New here? Create an account"
+                          : "Already have an account? Sign in"),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      "Lab staff accounts are created by an administrator.",
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 16),
-              ],
-              TextField(
-                controller: _emailController,
-                decoration: const InputDecoration(labelText: "Email"),
-                keyboardType: TextInputType.emailAddress,
               ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _passwordController,
-                decoration: const InputDecoration(labelText: "Password"),
-                obscureText: true,
-              ),
-              const SizedBox(height: 24),
-              if (_isLoading)
-                const CircularProgressIndicator()
-              else
-                ElevatedButton(
-                  onPressed: _submit,
-                  child: Text(_isLogin ? "Login" : "Register"),
-                ),
-              TextButton(
-                onPressed: () => setState(() => _isLogin = !_isLogin),
-                child: Text(_isLogin ? "Create an account" : "Have an account? Login"),
-              ),
-            ],
+            ),
           ),
         ),
       ),
+    );
+  }
+}
+
+class _Brand extends StatelessWidget {
+  final ColorScheme scheme;
+  const _Brand({required this.scheme});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Container(
+          height: 76,
+          width: 76,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [scheme.primary, AppTheme.accent],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(22),
+          ),
+          child: const Icon(Icons.bloodtype_rounded, color: Colors.white, size: 40),
+        ),
+        const SizedBox(height: 14),
+        Text(
+          "HomeLab",
+          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.5,
+              ),
+        ),
+        Text(
+          "Blood tests, collected at home",
+          style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
+        ),
+      ],
     );
   }
 }

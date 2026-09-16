@@ -23,20 +23,43 @@ service cloud.firestore {
       // Admins and phlebotomists are promoted by an admin (see README).
       allow create: if signedIn()
         && request.auth.uid == userId
-        && request.resource.data.keys().hasOnly(['email', 'role', 'name', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['email', 'role', 'name', 'phone', 'createdAt'])
         && request.resource.data.role == 'patient'
         && request.resource.data.email == request.auth.token.email
         && isShortString(request.resource.data.name, 100)
+        && isShortString(request.resource.data.phone, 20)
         && request.resource.data.createdAt == request.time;
 
-      // Users may edit their own name but never their role or email.
+      // Users may edit their own name and phone but never their role or email.
       allow update: if isAdmin()
         || (signedIn()
           && request.auth.uid == userId
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name'])
-          && isShortString(request.resource.data.name, 100));
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'phone'])
+          && isShortString(request.resource.data.name, 100)
+          && isShortString(request.resource.data.phone, 20));
 
       allow delete: if isAdmin();
+
+      // Addresses a patient saved for reuse. Private to them: the lab only ever
+      // sees the copy written onto an appointment they book.
+      match /addresses/{addressId} {
+        allow read, delete: if signedIn() && request.auth.uid == userId;
+
+        allow create, update: if signedIn()
+          && request.auth.uid == userId
+          && request.resource.data.keys().hasOnly([
+            'label', 'flatNumber', 'floor', 'address',
+            'location', 'isDefault', 'createdAt'
+          ])
+          && isShortString(request.resource.data.label, 40)
+          && isShortString(request.resource.data.address, 500)
+          && request.resource.data.flatNumber is string
+          && request.resource.data.flatNumber.size() <= 50
+          && request.resource.data.floor is string
+          && request.resource.data.floor.size() <= 20
+          && request.resource.data.location is latlng
+          && request.resource.data.isDefault is bool;
+      }
     }
 
     match /appointments/{appointmentId} {
@@ -49,9 +72,20 @@ service cloud.firestore {
       // Patients book for themselves only, and bookings always start unassigned.
       allow create: if signedIn()
         && request.resource.data.keys().hasOnly([
-          'patientId', 'patientName', 'testType', 'dateTime', 'location',
-          'address', 'flatNumber', 'floor', 'status', 'phlebotomistId', 'createdAt'
+          'patientId', 'patientName', 'patientPhone', 'tests', 'testType',
+          'price', 'dateTime', 'location', 'address', 'flatNumber', 'floor',
+          'notes', 'status', 'phlebotomistId', 'reportCount', 'createdAt'
         ])
+        && request.resource.data.tests is list
+        && request.resource.data.tests.size() > 0
+        && request.resource.data.tests.size() <= 10
+        && request.resource.data.reportCount == 0
+        && request.resource.data.price is int
+        && request.resource.data.price >= 0
+        && request.resource.data.patientPhone is string
+        && request.resource.data.patientPhone.size() <= 20
+        && request.resource.data.notes is string
+        && request.resource.data.notes.size() <= 500
         && request.resource.data.patientId == request.auth.uid
         && request.resource.data.status == 'pending'
         && request.resource.data.phlebotomistId == null
@@ -75,20 +109,43 @@ service cloud.firestore {
           && resource.data.status == 'assigned'
           && request.resource.data.status == 'completed'
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+        ) || (
+          // The patient may call off a visit that hasn't happened yet.
+          signedIn()
+          && resource.data.patientId == request.auth.uid
+          && resource.data.status in ['pending', 'assigned']
+          && request.resource.data.status == 'cancelled'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
         );
 
       allow delete: if isAdmin();
 
-      // Lab reports are stored as binary chunks here because Cloud Storage
-      // needs a billing account. Only the patient and admins may read them —
-      // notably not the phlebotomist who collected the sample.
-      match /reportChunks/{chunkId} {
-        function appointment() {
-          return get(/databases/$(database)/documents/appointments/$(appointmentId)).data;
-        }
+      // Lab reports are stored as binary chunks because Cloud Storage needs a
+      // billing account. Only the patient and admins may read them — notably
+      // not the phlebotomist who collected the sample.
+      function appointmentData() {
+        return get(/databases/$(database)/documents/appointments/$(appointmentId)).data;
+      }
 
-        allow read: if signedIn()
-          && (appointment().patientId == request.auth.uid || isAdmin());
+      function mayReadReports() {
+        return signedIn()
+          && (appointmentData().patientId == request.auth.uid || isAdmin());
+      }
+
+      // One report per booked test, with its bytes in `chunks`.
+      match /reports/{reportId} {
+        allow read: if mayReadReports();
+        allow write: if isAdmin();
+
+        match /chunks/{chunkId} {
+          allow read: if mayReadReports();
+          allow write: if isAdmin();
+        }
+      }
+
+      // Reports uploaded before per-test reports existed.
+      match /reportChunks/{chunkId} {
+        allow read: if mayReadReports();
         allow write: if isAdmin();
       }
     }

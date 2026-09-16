@@ -268,12 +268,122 @@ The corrupted Gradle cache entry that failed earlier with *"Could not move
 temporary workspace"* resolved itself once the stale Gradle daemon was stopped,
 so nothing in `C:\Users\dhirt\.gradle` was deleted.
 
+## 10. UI redesign and new features
+
+A second pass rebuilt the interface on a shared design system and added the
+features below.
+
+### Design system
+
+- [app_theme.dart](lib/core/theme/app_theme.dart) — one Material 3 theme in
+  **light and dark**, built from a clinical teal palette, with consistent
+  cards, inputs, buttons, dialogs and sheets. Screens no longer hand-roll
+  their own colours and shapes.
+- Reusable pieces: [status_badge.dart](lib/core/widgets/status_badge.dart) for
+  the appointment lifecycle, and
+  [state_views.dart](lib/core/widgets/state_views.dart) for empty, error and
+  loading states — so a failure now looks different from "nothing here",
+  which was a real bug before.
+- **Dark mode** with a toggle in the app bar, remembered between launches
+  ([theme_controller.dart](lib/core/theme/theme_controller.dart)).
+
+### Screens
+
+| Screen | What changed |
+| --- | --- |
+| Login | Branded, real form validation, show/hide password, phone number at sign-up |
+| Splash | Branded loading screen instead of a bare spinner |
+| Patient home | Greeting header, status badges, "report ready" markers, empty state, pull to refresh |
+| Appointment detail *(new)* | Status timeline, visit details, test preparation info, cancel action |
+| Book a test | Test catalogue picker, fasting warnings, notes field, live price total |
+| Report view | Report metadata (file name, size, upload time) and clearer actions |
+| Admin dashboard | Three tabs, **search by patient or test**, richer cards, tap-to-select collector, restyled upload dialog |
+| Phlebotomist | Stops sorted soonest-first, today's times highlighted, address on the card |
+| Collection screen | Map with a directions button, **call patient**, flat/floor/notes, completion state |
+
+### New features
+
+- **Test catalogue** ([test_catalog.dart](lib/core/constants/test_catalog.dart))
+  — ten tests with descriptions, fasting requirements, turnaround times and
+  prices. Patients pick from a list instead of typing a test name, so the
+  lab receives consistent values. **Prices are placeholders — edit them.**
+- **Fasting guidance** shown at booking and on the appointment, since it's the
+  thing patients most often get wrong.
+- **Phone numbers**: captured at registration, stored on the booking, and the
+  phlebotomist gets a one-tap **call** button.
+- **Cancellation**: a patient can call off a pending or assigned visit. The
+  rules enforce that they can't cancel a completed one, can't cancel anyone
+  else's, and can't change any other field while doing it.
+- **Notes to the collector** (landmark, gate code) on each booking.
+
+### Data model additions
+
+New fields on `appointments`: `patientPhone`, `price`, `notes`, and the
+`cancelled` status. New field on `users`: `phone`. Older records without them
+still display correctly.
+
+> **Action required:** these need a rules deploy, or cancelling and booking
+> will fail with permission errors:
+> `firebase deploy --only firestore:rules --project laboratory-app-2953e`
+
+## 11. Multiple tests, saved addresses and a profile screen
+
+### Several tests in one visit
+
+A booking now covers as many tests as the patient needs, and the lab issues
+**one report per test**.
+
+- The catalogue picker is multi-select, with a running total at the bottom
+  ([book_appointment_screen.dart](lib/features/patient/book_appointment_screen.dart)).
+- Appointments store a `tests` array (`id`, `name`, `price`) with `price` as
+  the sum. `testType` is kept as a readable summary so nothing that read the
+  old field breaks.
+- Reports moved to `appointments/{id}/reports/{testId}` with their bytes in a
+  `chunks` subcollection underneath
+  ([report_service.dart](lib/core/services/report_service.dart)).
+- The admin upload dialog asks **which test** a report belongs to, and marks
+  the tests already uploaded, so a three-test visit has three slots.
+- The appointment screen lists each test with its own row: *Ready* with a
+  View button, or *Awaiting lab*.
+
+### Saved addresses
+
+- Patients save addresses once (`Home`, `Work`, …) and pick one at booking
+  instead of retyping ([address_service.dart](lib/core/services/address_service.dart)).
+- One address can be the **default**, which is pre-selected when booking.
+- Booking a new location offers to save it, with a label.
+- Addresses live under `users/{uid}/addresses`, private to that patient:
+  the rules deny even **admins** and phlebotomists. The lab only sees the copy
+  written onto a booking. Editing an address later does not rewrite past
+  appointments, so a collector's details can't change after the fact.
+
+### Profile screen
+
+[profile_screen.dart](lib/features/patient/profile_screen.dart) — reachable
+from the icon in the patient home header. Edits name and **mobile number**,
+and manages saved addresses.
+
+> Previously the phone number could only be set during registration, so
+> accounts created earlier had no way to add one — even though the collector's
+> "call patient" button depends on it.
+
+### Backward compatibility
+
+Appointments booked before this change have no `tests` array and use the older
+report layout. `bookedTestsOf()` falls back to the single `testType` string,
+and `downloadLegacyReport()` still opens those reports — both covered by rules
+tests.
+
+> **Action required:** deploy the rules, or saved addresses, cancellation and
+> multi-test bookings fail with permission errors:
+> `firebase deploy --only firestore:rules --project laboratory-app-2953e`
+
 ## Verification
 
 | Check | Result |
 | --- | --- |
 | `flutter analyze` | No issues found |
 | `flutter test` | All tests passed |
-| Security rules (Firestore emulator, 34 scenarios) | 34/34 passed |
+| Security rules (Firestore emulator, 49 scenarios) | 49/49 passed |
 | Android debug build | `flutter build apk --debug` succeeded |
 | iOS build | Not verified; needs a Mac |
