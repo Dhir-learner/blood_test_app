@@ -32,7 +32,13 @@ migrate_working_dir/
 .pub-cache/
 .pub/
 /build/
+/android/build/
 /coverage/
+analysis*.txt
+
+# Firebase CLI / emulator local state
+.firebase/
+*-debug.log
 
 # ADDED BY COPILOT - Firebase Configuration Files (SENSITIVE - DO NOT COMMIT)
 **/android/app/google-services.json

@@ -1,0 +1,96 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function isShortString(value, maxLength) {
+      return value is string && value.size() > 0 && value.size() <= maxLength;
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
+
+      // Self-registration can only ever create a patient profile.
+      // Admins and phlebotomists are promoted by an admin (see README).
+      allow create: if signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(['email', 'role', 'name', 'createdAt'])
+        && request.resource.data.role == 'patient'
+        && request.resource.data.email == request.auth.token.email
+        && isShortString(request.resource.data.name, 100)
+        && request.resource.data.createdAt == request.time;
+
+      // Users may edit their own name but never their role or email.
+      allow update: if isAdmin()
+        || (signedIn()
+          && request.auth.uid == userId
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name'])
+          && isShortString(request.resource.data.name, 100));
+
+      allow delete: if isAdmin();
+    }
+
+    match /appointments/{appointmentId} {
+      allow read: if signedIn() && (
+        resource.data.patientId == request.auth.uid
+        || resource.data.phlebotomistId == request.auth.uid
+        || isAdmin()
+      );
+
+      // Patients book for themselves only, and bookings always start unassigned.
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly([
+          'patientId', 'patientName', 'testType', 'dateTime', 'location',
+          'address', 'flatNumber', 'floor', 'status', 'phlebotomistId', 'createdAt'
+        ])
+        && request.resource.data.patientId == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.phlebotomistId == null
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.dateTime is timestamp
+        && request.resource.data.dateTime > request.time
+        && request.resource.data.location is latlng
+        && isShortString(request.resource.data.patientName, 100)
+        && isShortString(request.resource.data.testType, 100)
+        && isShortString(request.resource.data.address, 500)
+        && isShortString(request.resource.data.flatNumber, 50)
+        && isShortString(request.resource.data.floor, 20);
+
+      allow update: if (
+          isAdmin()
+          && request.resource.data.patientId == resource.data.patientId
+        ) || (
+          // The assigned phlebotomist may only mark their task as completed.
+          signedIn()
+          && resource.data.phlebotomistId == request.auth.uid
+          && resource.data.status == 'assigned'
+          && request.resource.data.status == 'completed'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+        );
+
+      allow delete: if isAdmin();
+
+      // Lab reports are stored as binary chunks here because Cloud Storage
+      // needs a billing account. Only the patient and admins may read them —
+      // notably not the phlebotomist who collected the sample.
+      match /reportChunks/{chunkId} {
+        function appointment() {
+          return get(/databases/$(database)/documents/appointments/$(appointmentId)).data;
+        }
+
+        allow read: if signedIn()
+          && (appointment().patientId == request.auth.uid || isAdmin());
+        allow write: if isAdmin();
+      }
+    }
+  }
+}

@@ -28,17 +28,24 @@ class _PhlebotomistMapScreenState extends State<PhlebotomistMapScreen> {
   }
 
   Future<void> _completeTask() async {
-    await FirebaseFirestore.instance
-        .collection('appointments')
-        .doc(widget.appointmentId)
-        .update({'status': 'completed'});
-    
-    if (mounted) {
-      Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Task Marked as Completed")),
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await FirebaseFirestore.instance
+          .collection('appointments')
+          .doc(widget.appointmentId)
+          .update({'status': 'completed'});
+    } catch (e) {
+      debugPrint("Complete task error: $e");
+      messenger.showSnackBar(
+        const SnackBar(content: Text("Could not update the task. Please try again.")),
       );
+      return;
     }
+
+    if (mounted) Navigator.pop(context);
+    messenger.showSnackBar(
+      const SnackBar(content: Text("Task Marked as Completed")),
+    );
   }
 
   @override

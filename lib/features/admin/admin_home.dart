@@ -1,10 +1,9 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:file_picker/file_picker.dart';
 import '../../core/services/auth_service.dart';
-import '../../core/services/storage_service.dart';
+import '../../core/services/report_service.dart';
 
 class AdminHome extends StatelessWidget {
   const AdminHome({super.key});
@@ -54,6 +53,11 @@ class AppointmentList extends StatelessWidget {
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
+        }
+
+        if (snapshot.hasError) {
+          debugPrint("Error loading appointments: ${snapshot.error}");
+          return const Center(child: Text("Could not load appointments."));
         }
 
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
@@ -123,17 +127,17 @@ class UploadReportDialog extends StatefulWidget {
 }
 
 class _UploadReportDialogState extends State<UploadReportDialog> {
-  File? _selectedFile;
+  PlatformFile? _selectedFile;
   bool _isUploading = false;
 
   Future<void> _pickFile() async {
-    final result = await FilePicker.platform.pickFiles(
+    final file = await FilePicker.pickFile(
       type: FileType.custom,
-      allowedExtensions: ['pdf', 'jpg', 'png'],
+      allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png'],
     );
 
-    if (result != null && result.files.single.path != null) {
-      setState(() => _selectedFile = File(result.files.single.path!));
+    if (file != null) {
+      setState(() => _selectedFile = file);
     }
   }
 
@@ -142,20 +146,13 @@ class _UploadReportDialogState extends State<UploadReportDialog> {
 
     setState(() => _isUploading = true);
     try {
-      final url = await StorageService().uploadReport(widget.appointmentId, _selectedFile!);
-      if (url != null) {
-        await FirebaseFirestore.instance
-            .collection('appointments')
-            .doc(widget.appointmentId)
-            .update({'reportUrl': url});
-        if (mounted) Navigator.pop(context);
-      } else {
-        throw "Upload failed";
-      }
+      await ReportService().uploadReport(widget.appointmentId, _selectedFile!);
+      if (mounted) Navigator.pop(context);
     } catch (e) {
+      debugPrint("Upload error: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error: $e")),
+          SnackBar(content: Text(e is String ? e : "Upload failed. Please try again.")),
         );
       }
     } finally {
@@ -171,7 +168,7 @@ class _UploadReportDialogState extends State<UploadReportDialog> {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (_selectedFile != null)
-            Text("Selected: ${p.basename(_selectedFile!.path)}")
+            Text("Selected: ${_selectedFile!.name}")
           else
             const Text("No file selected"),
           const SizedBox(height: 16),
@@ -258,15 +255,24 @@ class _AssignPhlebotomistDialogState extends State<AssignPhlebotomistDialog> {
           onPressed: _selectedPhlebotomistId == null
               ? null
               : () async {
-                  await FirebaseFirestore.instance
-                      .collection('appointments')
-                      .doc(widget.appointmentId)
-                      .update({
-                    'status': 'assigned',
-                    'phlebotomistId': _selectedPhlebotomistId,
-                    'phlebotomistName': _selectedPhlebotomistName,
-                  });
-                  if (mounted) Navigator.pop(context);
+                  try {
+                    await FirebaseFirestore.instance
+                        .collection('appointments')
+                        .doc(widget.appointmentId)
+                        .update({
+                      'status': 'assigned',
+                      'phlebotomistId': _selectedPhlebotomistId,
+                      'phlebotomistName': _selectedPhlebotomistName,
+                    });
+                    if (context.mounted) Navigator.pop(context);
+                  } catch (e) {
+                    debugPrint("Assign error: $e");
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text("Could not assign. Please try again.")),
+                      );
+                    }
+                  }
                 },
           child: const Text("Assign"),
         ),

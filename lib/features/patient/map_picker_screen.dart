@@ -17,7 +17,13 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
   LatLng _selectedLocation = const LatLng(51.5, -0.09); // Default: London (Placeholder)
   String _selectedAddress = "Unknown Address";
   final MapController _mapController = MapController();
+  bool _mapReady = false;
   bool _isLoading = true;
+
+  // Nominatim's usage policy requires an identifying User-Agent with contact info.
+  static const _nominatimHeaders = {
+    'User-Agent': 'BloodTestApp/1.0 (dhirthakar8503@gmail.com)',
+  };
   
   final TextEditingController _searchController = TextEditingController();
   List<dynamic> _searchResults = [];
@@ -38,62 +44,57 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
   }
 
   Future<void> _getCurrentLocation() async {
-    bool serviceEnabled;
-    LocationPermission permission;
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) return;
 
-    serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      setState(() => _isLoading = false);
-      return;
-    }
-
-    permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
+      var permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
-        setState(() => _isLoading = false);
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
         return;
       }
-    }
-    
-    if (permission == LocationPermission.deniedForever) {
-      setState(() => _isLoading = false);
-      return;
-    } 
 
-    Position position = await Geolocator.getCurrentPosition();
-    setState(() {
-      _selectedLocation = LatLng(position.latitude, position.longitude);
-      _isLoading = false;
-    });
-    _mapController.move(_selectedLocation, 15.0);
-    _reverseGeocode(_selectedLocation);
+      final position = await Geolocator.getCurrentPosition();
+      if (!mounted) return;
+      setState(() => _selectedLocation = LatLng(position.latitude, position.longitude));
+      // On first load the map isn't built yet; it will open at initialCenter instead.
+      if (_mapReady) _mapController.move(_selectedLocation, 15.0);
+      _reverseGeocode(_selectedLocation);
+    } catch (e) {
+      debugPrint("Error getting location: $e");
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   Future<void> _reverseGeocode(LatLng location) async {
     try {
       final response = await http.get(
-        Uri.parse(
-          'https://nominatim.openstreetmap.org/reverse?format=json&lat=${location.latitude}&lon=${location.longitude}',
-        ),
-        headers: {
-          'User-Agent': 'BloodTestApp/1.0 (dhirthakar8503@gmail.com)', // Specific user agent is required by Nominatim
-        },
+        Uri.https('nominatim.openstreetmap.org', '/reverse', {
+          'format': 'json',
+          'lat': '${location.latitude}',
+          'lon': '${location.longitude}',
+        }),
+        headers: _nominatimHeaders,
       );
-      if (response.statusCode == 200) {
+      if (response.statusCode == 200 && mounted) {
         final data = json.decode(response.body);
         setState(() {
           _selectedAddress = data['display_name'] ?? "Unknown Address";
         });
       }
     } catch (e) {
-      print("Error reverse geocoding: $e");
+      debugPrint("Error reverse geocoding: $e");
     }
   }
 
   void _onSearchChanged(String query) {
     if (_debounce?.isActive ?? false) _debounce!.cancel();
     _debounce = Timer(const Duration(milliseconds: 500), () async {
+      if (!mounted) return;
       if (query.isEmpty) {
         setState(() {
           _searchResults = [];
@@ -105,25 +106,22 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
         _isSearching = true;
       });
       try {
+        // Uri.https encodes the query, so characters like & or # can't inject parameters.
         final response = await http.get(
-          Uri.parse(
-            'https://nominatim.openstreetmap.org/search?format=json&q=$query&limit=5',
-          ),
-          headers: {
-            'User-Agent': 'BloodTestApp/1.0 (dhirthakar8503@gmail.com)', // Required by Nominatim
-          },
+          Uri.https('nominatim.openstreetmap.org', '/search', {
+            'format': 'json',
+            'q': query,
+            'limit': '5',
+          }),
+          headers: _nominatimHeaders,
         );
-        if (response.statusCode == 200) {
-          setState(() {
-            _searchResults = json.decode(response.body);
-            _isSearching = false;
-          });
+        if (response.statusCode == 200 && mounted) {
+          setState(() => _searchResults = json.decode(response.body));
         }
       } catch (e) {
-        print("Search error: $e");
-        setState(() {
-          _isSearching = false;
-        });
+        debugPrint("Search error: $e");
+      } finally {
+        if (mounted) setState(() => _isSearching = false);
       }
     });
   }
@@ -170,6 +168,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                   options: MapOptions(
                     initialCenter: _selectedLocation,
                     initialZoom: 15.0,
+                    onMapReady: () => _mapReady = true,
                     onTap: (tapPosition, point) {
                       setState(() {
                         _selectedLocation = point;

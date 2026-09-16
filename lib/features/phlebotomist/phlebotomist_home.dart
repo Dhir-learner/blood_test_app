@@ -34,6 +34,11 @@ class PhlebotomistHome extends StatelessWidget {
                   return const Center(child: CircularProgressIndicator());
                 }
 
+                if (snapshot.hasError) {
+                  debugPrint("Error loading tasks: ${snapshot.error}");
+                  return const Center(child: Text("Could not load tasks."));
+                }
+
                 if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                   return const Center(child: Text("No assigned tasks."));
                 }

@@ -1,0 +1,40 @@
+rules_version = '2';
+
+// NOT IN USE. Cloud Storage requires the Blaze billing plan, so reports are
+// currently stored as chunks in Firestore instead (see ReportService and the
+// reportChunks rules in firestore.rules).
+//
+// Keep this file if you later upgrade to Blaze: enable Storage in the console,
+// add a "storage": { "rules": "storage.rules" } block back to firebase.json,
+// and switch ReportService back to Cloud Storage.
+//
+// Uses cross-service Firestore lookups; the first `firebase deploy` will ask
+// to grant Cloud Storage permission to read Firestore.
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isAdmin() {
+      return request.auth != null
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function isPatientOf(appointmentId) {
+      return request.auth != null
+        && firestore.get(/databases/(default)/documents/appointments/$(appointmentId)).data.patientId == request.auth.uid;
+    }
+
+    // Reports: only the appointment's patient and admins can read; only admins can write.
+    match /reports/{appointmentId}/{fileName} {
+      allow read: if isPatientOf(appointmentId) || isAdmin();
+
+      // Size limit is kept in sync with StorageService.maxReportBytes.
+      allow create, update: if isAdmin()
+        && request.resource.size <= 10 * 1024 * 1024
+        && request.resource.contentType.matches('application/pdf|image/jpeg|image/png');
+
+      allow delete: if isAdmin();
+    }
+
+    // Everything else is denied by default.
+  }
+}

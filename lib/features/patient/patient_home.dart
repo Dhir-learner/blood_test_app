@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../core/services/auth_service.dart';
 import '../../core/services/appointment_service.dart';
 import 'book_appointment_screen.dart';
+import 'report_view_screen.dart';
 
 class PatientHome extends StatelessWidget {
   const PatientHome({super.key});
@@ -32,6 +33,11 @@ class PatientHome extends StatelessWidget {
                   return const Center(child: CircularProgressIndicator());
                 }
 
+                if (snapshot.hasError) {
+                  debugPrint("Error loading appointments: ${snapshot.error}");
+                  return const Center(child: Text("Could not load appointments."));
+                }
+
                 if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                   return const Center(child: Text("No appointments yet."));
                 }
@@ -41,10 +47,11 @@ class PatientHome extends StatelessWidget {
                 return ListView.builder(
                   itemCount: docs.length,
                   itemBuilder: (context, index) {
-                    final data = docs[index].data() as Map<String, dynamic>;
+                    final doc = docs[index];
+                    final data = doc.data() as Map<String, dynamic>;
                     final date = (data['dateTime'] as Timestamp).toDate();
                     final status = data['status'] ?? 'pending';
-                    final reportUrl = data['reportUrl'];
+                    final hasReport = data['reportChunkCount'] != null;
 
                     return Card(
                       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -55,14 +62,17 @@ class PatientHome extends StatelessWidget {
                         ),
                         title: Text(data['testType'] ?? 'Blood Test'),
                         subtitle: Text(DateFormat('MMM d, y - h:mm a').format(date)),
-                        trailing: reportUrl != null
+                        trailing: hasReport
                             ? IconButton(
                                 icon: const Icon(Icons.description, color: Colors.blue),
                                 onPressed: () {
                                   Navigator.push(
                                     context,
                                     MaterialPageRoute(
-                                      builder: (context) => ReportViewScreen(appointmentData: data),
+                                      builder: (context) => ReportViewScreen(
+                                        appointmentId: doc.id,
+                                        appointmentData: data,
+                                      ),
                                     ),
                                   );
                                 },

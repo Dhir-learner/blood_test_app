@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/services/auth_service.dart';
 import '../../core/services/firestore_service.dart';
 
@@ -17,39 +18,71 @@ class _LoginScreenState extends State<LoginScreen> {
   final FirestoreService _firestoreService = FirestoreService();
 
   bool _isLogin = true;
-  String _selectedRole = 'patient'; // Default role for registration
   bool _isLoading = false;
 
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  // Generic messages for credential failures so the UI doesn't reveal which accounts exist.
+  String _authErrorMessage(FirebaseAuthException e) {
+    switch (e.code) {
+      case 'invalid-email':
+        return "Please enter a valid email address.";
+      case 'weak-password':
+        return "Password must be at least 6 characters.";
+      case 'email-already-in-use':
+        return "An account already exists for this email.";
+      case 'user-disabled':
+        return "This account has been disabled.";
+      case 'too-many-requests':
+        return "Too many attempts. Please try again later.";
+      case 'network-request-failed':
+        return "Network error. Please check your connection.";
+      default:
+        return _isLogin ? "Invalid email or password." : "Registration failed. Please try again.";
+    }
+  }
+
   void _submit() async {
+    final email = _emailController.text.trim();
+    final password = _passwordController.text; // Passwords are never trimmed
+    final name = _nameController.text.trim();
+
+    if (email.isEmpty || password.isEmpty || (!_isLogin && name.isEmpty)) {
+      _showError("Please fill all fields");
+      return;
+    }
+
     setState(() => _isLoading = true);
     try {
       if (_isLogin) {
-        await _authService.signIn(
-          _emailController.text.trim(),
-          _passwordController.text.trim(),
-        );
+        await _authService.signIn(email, password);
       } else {
-        // Register
-        final cred = await _authService.signUp(
-          _emailController.text.trim(),
-          _passwordController.text.trim(),
-        );
+        // Register (always as a patient)
+        final cred = await _authService.signUp(email, password);
         if (cred.user != null) {
           await _firestoreService.createUserProfile(
             cred.user!.uid,
-            _emailController.text.trim(),
-            _selectedRole,
-            _nameController.text.trim(),
+            cred.user!.email ?? email,
+            name,
           );
         }
       }
       // Navigation is handled by AuthWrapper listening to stream
+    } on FirebaseAuthException catch (e) {
+      if (mounted) _showError(_authErrorMessage(e));
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error: ${e.toString()}")),
-        );
-      }
+      debugPrint("Auth error: $e");
+      if (mounted) _showError("Something went wrong. Please try again.");
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -69,17 +102,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 TextField(
                   controller: _nameController,
                   decoration: const InputDecoration(labelText: "Full Name"),
-                ),
-                const SizedBox(height: 16),
-                DropdownButtonFormField<String>(
-                  initialValue: _selectedRole,
-                  items: const [
-                    DropdownMenuItem(value: 'patient', child: Text("Patient")),
-                    DropdownMenuItem(value: 'admin', child: Text("Admin")),
-                    DropdownMenuItem(value: 'phlebotomist', child: Text("Phlebotomist")),
-                  ],
-                  onChanged: (val) => setState(() => _selectedRole = val!),
-                  decoration: const InputDecoration(labelText: "Role"),
                 ),
                 const SizedBox(height: 16),
               ],

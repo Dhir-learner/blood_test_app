@@ -26,6 +26,7 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
 
   final AppointmentService _appointmentService = AppointmentService();
   final AuthService _authService = AuthService();
+  final FirestoreService _firestoreService = FirestoreService();
 
   @override
   void dispose() {
@@ -80,26 +81,30 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
       return;
     }
 
+    // Combine date and time
+    final dateTime = DateTime(
+      _selectedDate!.year,
+      _selectedDate!.month,
+      _selectedDate!.day,
+      _selectedTime!.hour,
+      _selectedTime!.minute,
+    );
+    if (!dateTime.isAfter(DateTime.now())) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please pick a time in the future")),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
     try {
       final user = _authService.currentUser;
       if (user != null) {
-        // Combine date and time
-        final dateTime = DateTime(
-          _selectedDate!.year,
-          _selectedDate!.month,
-          _selectedDate!.day,
-          _selectedTime!.hour,
-          _selectedTime!.minute,
-        );
-
-        // Ideally fetch name from Firestore, but for now using email or placeholder
-        // In a real app, we'd have a UserProvider
-        String name = user.email ?? "Unknown"; 
+        final name = await _firestoreService.getUserName(user.uid) ?? user.email ?? "Unknown";
 
         await _appointmentService.createAppointment(
           patientId: user.uid,
-          patientName: name, // Should be real name
+          patientName: name,
           testType: _testTypeController.text.trim(),
           dateTime: dateTime,
           latitude: _selectedLocation!.latitude,
@@ -132,9 +137,10 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
         }
       }
     } catch (e) {
+      debugPrint("Booking error: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error: $e")),
+          const SnackBar(content: Text("Could not book the appointment. Please try again.")),
         );
       }
     } finally {

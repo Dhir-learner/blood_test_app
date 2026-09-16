@@ -30,7 +30,7 @@ class AppointmentService {
     });
   }
 
-  // Stream of appointments for a patient
+  // Stream of appointments for a patient (reports live in a reportChunks subcollection)
   Stream<QuerySnapshot> getPatientAppointments(String patientId) {
     return _db
         .collection('appointments')
