@@ -57,7 +57,19 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
         return;
       }
 
-      final position = await Geolocator.getCurrentPosition();
+      // A cached fix returns immediately. Asking for a live one registers GPS
+      // and NMEA listeners, which can block until the OS answers — that hangs
+      // the app on emulators and indoors, so it is only a fallback and is
+      // given a hard time limit.
+      final cached = await Geolocator.getLastKnownPosition();
+      final position = cached ??
+          await Geolocator.getCurrentPosition(
+            locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.medium,
+              timeLimit: Duration(seconds: 10),
+            ),
+          );
+
       if (!mounted) return;
       setState(() => _selectedLocation = LatLng(position.latitude, position.longitude));
       // On first load the map isn't built yet; it will open at initialCenter instead.
